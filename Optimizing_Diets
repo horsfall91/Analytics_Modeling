@@ -1,0 +1,228 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# # ISyE 6501 - HW11: Optimization
+# 
+# ## Problem Set 15
+
+# ### 15.2.1: Optimizing the cheapest diet that maintains min and max dietary constraints
+
+# ##### Check Python version, import necessary packages, load data
+
+# In[1]:
+
+
+from platform import python_version
+
+print(python_version())
+
+
+# In[2]:
+
+
+import pandas as pd
+import numpy as np
+from pulp import *
+#!pip install pulp
+
+
+# In[3]:
+
+
+df = pd.read_excel('C:/Users/Clayton/Desktop/Georgia Tech/ISYE_6501/hw11/data 15.2/diet.xls')
+
+
+# ##### Dataframe rebuild, so we isolate the variables, and the min-max constraints for later use
+
+# In[4]:
+
+
+variable_df = df.loc[0:63, df.columns != 'Serving Size']
+constraint_df = df.iloc[65:67, 3:]
+min_con = constraint_df.iloc[[0,]]
+max_con = constraint_df.iloc[[1,]]
+
+
+# In[5]:
+
+
+variable_df
+constraint_df
+min_con
+max_con
+variable_df
+
+
+# ##### Build a bunch of food-nutrient dictionaries. Probably should have looped this.
+
+# In[13]:
+
+
+food_items = list(variable_df['Foods'])
+food_items
+costs = dict(zip(food_items,variable_df['Price/ Serving']))
+calories = dict(zip(food_items,variable_df['Calories']))
+cholesterol = dict(zip(food_items,variable_df['Cholesterol mg']))
+fat = dict(zip(food_items,variable_df['Total_Fat g']))
+sodium = dict(zip(food_items,variable_df['Sodium mg']))
+carbs = dict(zip(food_items,variable_df['Carbohydrates g']))
+fiber = dict(zip(food_items,variable_df['Dietary_Fiber g']))
+protein = dict(zip(food_items,variable_df['Protein g']))
+vitamin_a = dict(zip(food_items,variable_df['Vit_A IU']))
+vitamin_c = dict(zip(food_items,variable_df['Vit_C IU']))
+calcium = dict(zip(food_items,variable_df['Calcium mg']))
+iron = dict(zip(food_items,variable_df['Iron mg']))
+servings = dict(zip(food_items,df['Serving Size']))
+nutrients = ['calories', 'cholesterol', 'fat', 'sodium', 'carbs', 'fiber', 'protien', 'vitamin_a', 'vitamin_c', 'calcium', 'iron']
+nutrient_dicts = [calories, cholesterol, fat, sodium, carbs, fiber, protein, vitamin_a, vitamin_c, calcium, iron]
+
+
+# In[ ]:
+
+
+
+
+
+# ##### Construct the Food Variable LP dict as a continuous zero-floor var
+
+# In[7]:
+
+
+food_vars = LpVariable.dicts("Food",food_items,lowBound=0,cat='Continuous')
+#food_vars
+
+
+# ##### build the optimization problem
+
+# In[8]:
+
+
+prob = LpProblem("Diet-Cost Optimization",LpMinimize)
+prob += lpSum([costs[i]*food_vars[i] for i in food_items])
+
+
+# ##### Loop through food-nutrient constraints
+
+# In[9]:
+
+
+j = 0
+for i in nutrient_dicts:
+    prob += lpSum([i[f] * food_vars[f] for f in food_items]) >= float(min_con.iloc[:,j])
+    prob += lpSum([i[f] * food_vars[f] for f in food_items]) <= float(max_con.iloc[:,j])
+    j += 1
+
+
+# ##### Solve and display the optimization problem
+
+# In[10]:
+
+
+prob.solve()
+
+
+# In[26]:
+
+
+for i in prob.variables():
+    if i.varValue>0:
+        print(i.name, "=", i.varValue, "servings.")
+
+
+# In[27]:
+
+
+obj = value(prob.objective)
+print("Cost of above diet is: ${}".format(round(obj,2)))
+
+
+# ### 15.2.2: Adding three additional complexities
+
+# ##### Two new variables: a food amounts variable (similar to the one used above), and a binary toggle variable.
+
+# In[30]:
+
+
+food_amounts_variable = LpVariable.dicts("Food",food_items,lowBound=0,cat='Continuous')
+food_binary_variable = LpVariable.dicts("Binary",food_items,0,1,cat='Integer')
+
+
+# In[31]:
+
+
+prob2 = LpProblem("Diet-Cost Optimization with Additional Complexities",LpMinimize)
+prob2 += lpSum([costs[i]*food_amounts_variable[i] for i in food_items])
+
+
+# ##### Keep the nutrient constraints the same as above.
+
+# In[32]:
+
+
+j = 0
+for i in nutrient_dicts:
+    prob2 += lpSum([i[f] * food_amounts_variable[f] for f in food_items]) >= float(min_con.iloc[:,j])
+    prob2 += lpSum([i[f] * food_amounts_variable[f] for f in food_items]) <= float(max_con.iloc[:,j])
+    j += 1
+
+
+# ##### Binary inclusion plus a 1/10th serving min
+
+# In[33]:
+
+
+for f in food_items:
+    prob2 += food_amounts_variable[f] >= food_binary_variable[f]*0.1
+    prob2 += food_amounts_variable[f] <= food_binary_variable[f]*100000
+
+
+# ##### Include NEITHER or AT MOST ONE of Frozen Broccoli and Raw Celery, I.E. the sum of the binaries must be less than or eqaul to 1.
+
+# In[35]:
+
+
+prob2 += food_binary_variable['Frozen Broccoli']+food_binary_variable['Celery, Raw']<=1
+
+
+# ##### Generate an indicator variable for which foods are PROTEINS, and make a dictionary out of them
+
+# In[36]:
+
+
+proteins = ['Tofu', 'Roasted Chicken', 'Poached Eggs', 'Scrambled Eggs', 'Bologna,Turkey',             'Frankfurter, Beef', 'Ham,Sliced,Extralean', 'Kielbasa,Prk',             'Hamburger W/Toppings', 'Hotdog, Plain', 'Pork', 'Sardines in Oil', 'White Tuna in Water']
+
+protein_df = pd.DataFrame(variable_df.loc[:,'Foods'])
+protein_df['Protein'] = protein_df['Foods'].apply(lambda x: 1 if x in proteins else 0)
+proteins_dict = dict(zip(protein_df.Foods, protein_df.Protein))
+
+
+# ##### The sum of protein binaries in the final food alotment must be at least 3.
+
+# In[37]:
+
+
+prob2 += lpSum([proteins_dict[f]*food_binary_variable[f] for f in food_items]) >= 3
+
+
+# ##### Solve the new Optimization, and show the updated meal and costs.
+
+# In[38]:
+
+
+prob2.solve()
+
+
+# In[44]:
+
+
+for i in prob2.variables():
+    if i.varValue>0 and i.name.startswith('Food_'):
+        print(i.name, "=", i.varValue)
+
+
+# In[40]:
+
+
+obj = value(prob2.objective)
+print("The total cost of this balanced diet is: ${}".format(round(obj,2)))
+
